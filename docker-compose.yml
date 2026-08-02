@@ -1,0 +1,76 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStrong@Passw0rd"
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssqldata:/var/opt/mssql
+
+  poll-service:
+    build:
+      context: .
+      dockerfile: src/PollService.Api/Dockerfile
+    ports:
+      - "5001:8080"
+    environment:
+      ConnectionStrings__PollDb: "Server=sqlserver,1433;Database=PollSurveyDb;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True;"
+    depends_on:
+      - sqlserver
+    restart: on-failure
+
+  vote-service:
+    build:
+      context: .
+      dockerfile: src/VoteService.Api/Dockerfile
+    ports:
+      - "5002:8080"
+    environment:
+      ConnectionStrings__VoteDb: "Server=sqlserver,1433;Database=PollSurveyVoteDb;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True;"
+      Services__PollService: "http://poll-service:8080"
+      Services__RealtimeService: "http://realtime-service:8080"
+    depends_on:
+      - sqlserver
+      - poll-service
+      - realtime-service
+    restart: on-failure
+
+  realtime-service:
+    build:
+      context: .
+      dockerfile: src/RealtimeService.Api/Dockerfile
+    ports:
+      - "5003:8080"
+    restart: on-failure
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: src/ApiGateway.Api/Dockerfile
+    ports:
+      - "5000:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Docker"
+    depends_on:
+      - poll-service
+      - vote-service
+      - realtime-service
+    restart: on-failure
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - api-gateway
+      - realtime-service
+
+volumes:
+  mssqldata:
