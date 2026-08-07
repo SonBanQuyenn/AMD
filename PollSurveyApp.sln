@@ -13,6 +13,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RealtimeService.Api", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiGateway.Api", "src\ApiGateway.Api\ApiGateway.Api.csproj", "{A2885FC9-A663-45FA-9E21-C17F775397DE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PollService.Api.Tests", "tests\PollService.Api.Tests\PollService.Api.Tests.csproj", "{452A3C31-DB72-4731-98CA-EB20EAEF4C77}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoteService.Api.Tests", "tests\VoteService.Api.Tests\VoteService.Api.Tests.csproj", "{DA31A22C-8A2D-4AF6-8C25-53F8D278A05D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +43,14 @@ Global
 		{A2885FC9-A663-45FA-9E21-C17F775397DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A2885FC9-A663-45FA-9E21-C17F775397DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A2885FC9-A663-45FA-9E21-C17F775397DE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{452A3C31-DB72-4731-98CA-EB20EAEF4C77}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{452A3C31-DB72-4731-98CA-EB20EAEF4C77}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{452A3C31-DB72-4731-98CA-EB20EAEF4C77}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{452A3C31-DB72-4731-98CA-EB20EAEF4C77}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DA31A22C-8A2D-4AF6-8C25-53F8D278A05D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DA31A22C-8A2D-4AF6-8C25-53F8D278A05D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DA31A22C-8A2D-4AF6-8C25-53F8D278A05D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DA31A22C-8A2D-4AF6-8C25-53F8D278A05D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

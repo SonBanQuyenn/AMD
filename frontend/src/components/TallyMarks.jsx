@@ -1,4 +1,3 @@
-// Một "group" kiểu kiểm phiếu truyền thống: 4 gạch dọc + 1 gạch chéo gộp nhóm 5.
 function TallyGroup({ count }) {
   const strokes = Math.min(count, 4);
   const positions = [4, 10, 16, 22];
@@ -13,7 +12,7 @@ function TallyGroup({ count }) {
   );
 }
 
-const MAX_VISIBLE_GROUPS = 24; // ~120 votes vẽ đủ - quá số này chỉ hiện số, tránh phình DOM
+const MAX_VISIBLE_GROUPS = 24;
 
 export default function TallyMarks({ count }) {
   if (count === 0) {

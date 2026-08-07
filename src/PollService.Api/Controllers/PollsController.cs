@@ -43,9 +43,6 @@ public class PollsController(PollDbContext db) : ControllerBase
             poll.CreatorToken));
     }
 
-    // GET /polls/{code} - fetch a poll (used by the voting page and analyst/results page).
-    // creatorToken is optional: pass it (as ?creatorToken=...) to also get back whether
-    // the caller is the poll's creator (IsCreator). Never echoes the token itself back.
     [HttpGet("{code}")]
     public async Task<IActionResult> Get(string code, [FromQuery] string? creatorToken)
     {

@@ -1,18 +1,9 @@
 namespace PollService.Api;
-
-// This is the "own poll DB" entity from the architecture diagram.
-// Only Poll service reads/writes this table directly.
 public class Poll
 {
     public Guid Id { get; set; }
-
-    // Short shareable code, e.g. "7fGh2" -> used in the URL /poll/7fGh2
     public string Code { get; set; } = default!;
-
     public string Question { get; set; } = default!;
-
-    // Stored as JSON in the DB (SQL Server has no native array type) via the
-    // value converter configured in PollDbContext.OnModelCreating.
     public string[] Options { get; set; } = Array.Empty<string>();
 
     public bool IsClosed { get; set; }
