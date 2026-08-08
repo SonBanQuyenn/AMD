@@ -1,6 +1,8 @@
-**/bin/
-**/obj/
-
-**/.vs/
-
-**/*.obj
+bin/
+obj/
+*.user
+.vs/
+.vscode/
+*.suo
+appsettings.Development.json
+EOF
