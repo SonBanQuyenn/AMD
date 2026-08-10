@@ -1,92 +1,147 @@
-# Poll & Survey Builder — microservice solution (AMD201)
+# Poll & Survey Builder — Microservice Solution (AMD201)
 
-Kiến trúc: `API Gateway` (Ocelot) đứng trước `Poll service` + `Vote service` +
-`Realtime service` (SignalR), mỗi service độc lập, giao tiếp qua REST. Xem chi tiết
-trong phần "Kiến trúc" bên dưới.
+An online polling and survey system built on a microservices architecture. An
+API Gateway (Ocelot) sits in front of a Poll Service, a Vote Service, and a
+Realtime Service (SignalR); each service is independent, owns its own
+database, and communicates over REST. See [Architecture](#architecture) below
+for the full request flow.
 
-## Trạng thái hiện tại
+## Table of Contents
 
-- ✅ **Poll service** — chạy được đầy đủ: tạo poll, xem poll, đóng poll, endpoint
-  `/status` cho service khác gọi vào. Controller: `Controllers/PollsController.cs`.
-- ✅ **Vote service** — chạy được đầy đủ: nhận vote, gọi sang Poll service để validate
-  (`PollServiceClient`), chặn vote trùng, trả kết quả, gọi Realtime service để broadcast.
-  Controller: `Controllers/VotesController.cs`.
-- ✅ **Realtime service** — chạy được đầy đủ: SignalR hub (`ResultsHub`), client join theo
-  poll code, `Controllers/BroadcastController.cs` nhận từ Vote service rồi đẩy xuống mọi
-  client đang xem poll đó.
-- ✅ **API Gateway** — Ocelot, route `/api/polls/**` → Poll service, `/api/votes/**` →
-  Vote service, `/hubs/**` → Realtime service (SignalR qua gateway là tính năng thử
-  nghiệm của Ocelot - xem ghi chú bên dưới).
-- ✅ **Frontend** — React (Vite), 3 trang: tạo poll, vote, xem kết quả trực tiếp qua SignalR.
+- [Current Status](#current-status)
+- [Architecture](#architecture)
+- [Technology Stack](#technology-stack)
+- [Project Structure](#project-structure)
+- [Prerequisites](#prerequisites)
+- [Running with Docker Compose](#running-with-docker-compose)
+- [Running Locally (without Docker)](#running-locally-without-docker)
+- [Database](#database)
+- [API Reference](#api-reference)
+- [Testing the Services End-to-End](#testing-the-services-end-to-end)
+- [Automated Tests and CI](#automated-tests-and-ci)
+- [Known Limitations](#known-limitations)
+- [Planned Next Steps](#planned-next-steps)
+- [Technical Notes](#technical-notes)
 
-Tất cả 4 project backend đều theo cấu trúc **Controller-based Web API** (giống template "ASP.NET
-Core Web API" mặc định của Visual Studio: `Controllers/`, `[ApiController]`, Swagger),
-không dùng Minimal API. Database dùng **SQL Server** (LocalDB cho local dev, container
-cho Docker) - xem phần "Database" bên dưới.
+## Current Status
 
-## Chạy Frontend
+| Service | Status | Description |
+|---|---|---|
+| Poll Service | Complete | Create, view, and close polls; exposes a `/status` endpoint for other services to call. |
+| Vote Service | Complete | Accepts votes, validates the poll against the Poll Service, blocks duplicate votes, and triggers a broadcast to the Realtime Service. |
+| Realtime Service | Complete | SignalR hub that clients join by poll code; receives broadcast requests from the Vote Service and pushes live results to every connected client. |
+| API Gateway | Complete | Ocelot gateway routing `/api/polls/**` to the Poll Service and `/api/votes/**` to the Vote Service. SignalR proxying through the gateway is available but treated as experimental — see [Technical Notes](#technical-notes). |
+| Frontend | Complete | React (Vite) single-page app with three pages: create a poll, vote, and view live results. |
+| Unit tests | Partial | Test projects exist for the Poll Service and Vote Service; coverage is not yet complete. |
+| CI/CD | Partial | GitHub Actions builds and runs tests on every push/PR to `main`. There is no automated deployment step yet. |
+| Cloud deployment | Not started | The system currently runs locally or via Docker Compose only. |
 
-```bash
-cd frontend
-npm install
-npm run dev
+All four backend services follow the standard **controller-based ASP.NET
+Core Web API** structure (`Controllers/`, `[ApiController]`, Swagger) rather
+than Minimal APIs. The database engine is **SQL Server** — LocalDB for local
+development, a SQL Server container for Docker Compose.
+
+## Architecture
+
+```
+Frontend (React SPA)
+  |-- REST requests -----------------> API Gateway (Ocelot, port 5000)
+  |-- SignalR (direct connection) ---> Realtime Service (port 5003)
+
+API Gateway
+  |-- /api/polls/**  --> Poll Service      (own database, port 5001)
+  |-- /api/votes/**  --> Vote Service      (own database, port 5002)
+  |-- /hubs/**       --> Realtime Service  (SignalR hub, port 5003, experimental route)
+
+Vote Service
+  |-- GET  /polls/{code}/status  --> Poll Service      (validates the poll before saving a vote)
+  |-- POST /broadcast/{code}     --> Realtime Service  (best-effort, after the vote is saved)
 ```
 
-Mở `http://localhost:5173`. File `.env` đã trỏ sẵn:
-- `VITE_GATEWAY_URL=http://localhost:5000/api` — mọi request REST đi qua Gateway.
-- `VITE_REALTIME_URL=http://localhost:5003` — SignalR nối **thẳng** tới Realtime service
-  (không qua gateway, xem lý do ở phần "Test gateway" bên dưới).
+The Vote Service never validates a poll on its own — it always asks the Poll
+Service over REST before writing a vote. This is the most important design
+decision to highlight in a presentation: the services have a clear boundary
+of responsibility and communicate through real service-to-service calls,
+rather than simply splitting code into separate folders.
 
-Cần chạy đủ cả 4 service backend (F5 trong Visual Studio với multiple startup projects,
-hoặc `docker compose up --build`) trước khi mở frontend.
+Each service owns an independent database (`PollSurveyDb` for the Poll
+Service, `PollSurveyVoteDb` for the Vote Service), even though both run on
+the same SQL Server instance in this setup.
 
-**3 trang:**
-- `/` — tạo poll (có thể chọn thêm thời gian hết hạn tùy chọn), tạo xong tự động
-  chuyển sang trang phân tích (`/poll/:code/results`) của chính poll đó.
-- `/poll/:code` — trang vote, chọn 1 lựa chọn để gửi phiếu (chặn vote trùng bằng
-  token lưu ở `localStorage`, xem `getVoterToken()` trong `src/api.js`). Vote bị
-  chặn nếu poll đã bị người tạo dừng thủ công hoặc đã quá `ExpiresAt`.
-- `/poll/:code/results` — **trang phân tích, chỉ người tạo poll xem được.** Hiện
-  kết quả trực tiếp qua SignalR, link để chia sẻ cho người vote, và nút "Dừng
-  nhận phiếu ngay" để đóng poll trước hạn bất cứ lúc nào.
+## Technology Stack
 
-**Cơ chế "chỉ người tạo mới xem được trang phân tích":** không có tài khoản/đăng
-nhập trong scope bài này, nên dùng một `CreatorToken` bí mật: Poll service sinh
-token này lúc `POST /polls` và **chỉ trả về đúng 1 lần** trong response tạo poll.
-Frontend lưu token vào `localStorage` (`saveCreatorToken` trong `src/api.js`).
-Mọi lần sau, `GET /polls/{code}?creatorToken=...` và `POST /polls/{code}/close`
-đều cần gửi token này; token khớp thì mới được xem trang phân tích / dừng poll.
-Vì token nằm trong `localStorage` của trình duyệt, chỉ trình duyệt đã tạo poll
-mới có quyền này - người khác chỉ có link vote thì không xem được trang phân tích.
+- **Backend:** ASP.NET Core Web API, C#, Entity Framework Core (Migrations)
+- **Database:** SQL Server (LocalDB for local development, containerized for Docker)
+- **Real-time:** SignalR
+- **API Gateway:** Ocelot
+- **Frontend:** React, Vite
+- **DevOps:** Docker Compose, GitHub Actions, Swagger UI
 
-**Đóng poll trước hạn / tự hết hạn:**
-- `Poll.ExpiresAt` (tùy chọn) là mốc thời gian tự động đóng, cấu hình lúc tạo poll.
-- `PollsController.Get`/`GetStatus` tự tính `IsExpired` mỗi lần gọi (so với
-  `DateTime.UtcNow`) - không cần job nền, poll tự "đóng" ngay khi hết hạn.
-- Người tạo có thể bấm "Dừng nhận phiếu ngay" ở trang phân tích để đóng poll thủ
-  công bất kỳ lúc nào, kể cả trước khi tới `ExpiresAt` (gọi `POST /polls/{code}/close`
-  kèm `CreatorToken`, trả 403 nếu token không khớp).
+## Project Structure
 
-## Database: SQL Server (LocalDB cho local dev, container cho Docker)
+```
+PollSurveyApp/
+├── src/
+│   ├── PollService.Api/        Poll creation, retrieval, closing (port 5001)
+│   ├── VoteService.Api/        Vote submission and validation (port 5002)
+│   ├── RealtimeService.Api/    SignalR hub and broadcast endpoint (port 5003)
+│   ├── ApiGateway.Api/         Ocelot gateway (port 5000)
+│   └── Shared.Contracts/       DTOs shared between services
+├── tests/
+│   ├── PollService.Api.Tests/
+│   └── VoteService.Api.Tests/
+├── frontend/                   React + Vite single-page app
+├── docker-compose.yml
+├── PollSurveyApp.sln
+└── README.md
+```
 
-- **Local dev (Visual Studio)**: dùng **LocalDB** — đã có sẵn khi cài Visual Studio, không cần
-  cài hay chạy gì thêm. Connection string trong `appsettings.json` của từng service đã trỏ
-  sẵn tới `(localdb)\mssqllocaldb`.
-- **Docker Compose**: dùng container `mcr.microsoft.com/mssql/server:2022-latest`, connection
-  string được override qua biến môi trường trong `docker-compose.yml`.
-- Poll service dùng DB `PollSurveyDb`, Vote service dùng DB `PollSurveyVoteDb` — vẫn đúng
-  nguyên tắc mỗi microservice sở hữu DB riêng, dù chạy chung 1 SQL Server instance.
-- Databases **tự động được tạo** khi chạy `dotnet ef database update` (khác Postgres, SQL
-  Server tự tạo DB nếu chưa tồn tại) - không cần script init riêng.
+## Prerequisites
 
-## Xem dữ liệu qua Server Explorer (Visual Studio)
+- .NET 8 SDK
+- Node.js 18+ and npm
+- SQL Server LocalDB (installed automatically with Visual Studio) for local development, **or**
+- Docker and Docker Compose for a containerized run
+- Visual Studio 2022 (recommended) or any editor with a C# extension
 
-1. **View → Server Explorer** → chuột phải **Data Connections** → **Add Connection**.
-2. Data source: **Microsoft SQL Server**. Server name: `(localdb)\mssqllocaldb`.
-3. Chọn database `PollSurveyDb` (tạo thêm 1 connection nữa cho `PollSurveyVoteDb`).
-4. Mở rộng cây → **Tables** → double-click bảng để xem/sửa dữ liệu trực tiếp.
+## Running with Docker Compose
 
-## Tạo migration lần đầu (bắt buộc trước khi chạy service)
+This is the simplest way to start the full system — backend, database, and
+frontend — with a single command:
+
+```bash
+docker compose up --build
+```
+
+This starts SQL Server, all four backend services, and the frontend (running
+the Vite dev server inside its container, with the source code mounted so
+local edits still hot-reload).
+
+- Frontend: `http://localhost:5173`
+- API Gateway: `http://localhost:5000`
+- Poll Service: `http://localhost:5001` (directly reachable for debugging)
+- Vote Service: `http://localhost:5002`
+- Realtime Service: `http://localhost:5003`
+- SQL Server: `localhost:1433`
+
+SQL Server takes a few seconds longer to become ready than the .NET
+services. Each backend service is configured with `restart: on-failure`, so
+if a container fails on its first attempt because SQL Server was not ready
+yet, Docker restarts it automatically — no manual action is needed, just
+wait 10–20 seconds after `docker compose up`.
+
+To stop everything: `Ctrl+C`, then `docker compose down` (add `-v` to also
+delete the SQL Server data volume).
+
+## Running Locally (without Docker)
+
+### 1. Open the solution
+
+Open `PollSurveyApp.sln` in Visual Studio. NuGet packages restore
+automatically; if not, right-click the solution and choose **Restore NuGet
+Packages**.
+
+### 2. Create the database migrations (first run only)
 
 ```bash
 cd src/PollService.Api
@@ -98,180 +153,229 @@ dotnet ef migrations add InitialCreate --context VoteDbContext --output-dir Migr
 dotnet ef database update --context VoteDbContext
 ```
 
-Không cần Docker/Postgres chạy cho bước này - LocalDB tự khởi động khi cần.
+This step does not require Docker or SQL Server to be running separately —
+LocalDB starts automatically when needed.
 
-> Nếu bạn đã từng chạy migration `InitialCreate` cho `PollDbContext` trước khi có
-> cột `CreatorToken`, chạy thêm một migration mới rồi update lại database:
+> If you already ran the `InitialCreate` migration for `PollDbContext`
+> before the `CreatorToken` column was added, run an additional migration
+> and update the database again:
 > ```bash
 > cd src/PollService.Api
 > dotnet ef migrations add AddCreatorToken --context PollDbContext --output-dir Migrations
 > dotnet ef database update --context PollDbContext
 > ```
 
-## Mở project trong Visual Studio
+### 3. Run the backend services
 
-1. Mở file `PollSurveyApp.sln`.
-2. Visual Studio sẽ tự restore NuGet packages. Nếu không, chuột phải vào Solution → **Restore NuGet Packages**.
-3. Chạy migration như trên (chỉ cần làm 1 lần, hoặc mỗi khi đổi entity).
-4. Chuột phải `PollService.Api` → **Set as Startup Project**, F5. Swagger UI mở tự động tại `/swagger`.
+In Visual Studio, set **Multiple Startup Projects** (or start each project
+individually with `dotnet run`):
 
-## Test nhanh bằng curl (hoặc dùng Swagger UI)
+1. `PollService.Api` — port 5001
+2. `VoteService.Api` — port 5002 (requires the Poll Service to be running)
+3. `RealtimeService.Api` — port 5003
+4. `ApiGateway.Api` — port 5000 (requires the three services above)
+
+Swagger UI opens automatically at `/swagger` for each service.
+
+### 4. Run the frontend
 
 ```bash
-# Tạo poll
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. The `.env` file is already configured with:
+
+- `VITE_GATEWAY_URL=http://localhost:5000/api` — all REST requests go through the gateway.
+- `VITE_REALTIME_URL=http://localhost:5003` — SignalR connects directly to the Realtime Service (not through the gateway; see [Technical Notes](#technical-notes)).
+
+All four backend services must be running before the frontend is opened.
+
+**Pages:**
+
+- `/` — create a poll (optionally set an expiry time). On success, the user
+  is redirected to that poll's results page.
+- `/poll/:code` — the voting page. Voters pick one option to submit their
+  vote. Duplicate votes are blocked using a token stored in
+  `localStorage` (see `getVoterToken()` in `src/api.js`). Voting is blocked
+  once the poll has been closed manually or has passed its expiry time.
+- `/poll/:code/results` — the results page, visible only to the poll's
+  creator. Shows live results via SignalR, a shareable voting link, and a
+  button to close the poll immediately.
+
+**Restricting the results page to the poll's creator:** this project has no
+login/account system in scope, so access is controlled with a secret
+`CreatorToken`. The Poll Service generates this token when a poll is
+created (`POST /polls`) and returns it exactly once, in that response only.
+The frontend stores it in `localStorage` (`saveCreatorToken` in
+`src/api.js`). Every subsequent request —
+`GET /polls/{code}?creatorToken=...` and `POST /polls/{code}/close` —
+must include this token; only a matching token grants access to the
+results page or the ability to close the poll. Because the token lives in
+the browser's `localStorage`, only the browser that created the poll has
+this access — anyone with just the voting link cannot see the results page.
+
+**Closing a poll early or letting it expire automatically:**
+
+- `Poll.ExpiresAt` (optional) is the automatic close time, set when the poll is created.
+- `PollsController.Get` / `GetStatus` compute `IsExpired` on every call by comparing against `DateTime.UtcNow` — no background job is needed; the poll "closes" itself the moment it expires.
+- The creator can also close a poll manually at any time from the results page (calls `POST /polls/{code}/close` with the `CreatorToken`; returns 403 if the token does not match).
+
+## Database
+
+- **Local development (Visual Studio):** uses **LocalDB**, which ships with
+  Visual Studio and requires no separate installation. The connection
+  string in each service's `appsettings.json` already points to
+  `(localdb)\mssqllocaldb`.
+- **Docker Compose:** uses a `mcr.microsoft.com/mssql/server:2022-latest`
+  container; the connection string is overridden through environment
+  variables in `docker-compose.yml`.
+- The Poll Service uses the `PollSurveyDb` database and the Vote Service
+  uses `PollSurveyVoteDb` — each microservice still owns a separate
+  database, even though both run on the same SQL Server instance.
+- Databases are created automatically the first time
+  `dotnet ef database update` runs (unlike PostgreSQL, SQL Server creates
+  the database itself if it does not already exist) — no separate init
+  script is required.
+
+### Inspecting data with Server Explorer (Visual Studio)
+
+1. **View → Server Explorer**, right-click **Data Connections**, choose **Add Connection**.
+2. Data source: **Microsoft SQL Server**. Server name: `(localdb)\mssqllocaldb`.
+3. Select the `PollSurveyDb` database (add a second connection for `PollSurveyVoteDb`).
+4. Expand the tree, open **Tables**, and double-click a table to view or edit its data directly.
+
+## API Reference
+
+### Poll Service (port 5001)
+
+```bash
+# Create a poll
 curl -X POST http://localhost:5001/polls \
   -H "Content-Type: application/json" \
-  -d '{"question":"Ngôn ngữ bạn thích nhất?","options":["C#","Python","JavaScript"]}'
+  -d '{"question":"Which language do you prefer?","options":["C#","Python","JavaScript"]}'
 
-# Xem poll (thay YOUR_CODE bằng code trả về ở bước trên).
-# response tạo poll ở trên có "creatorToken" - CHỈ xuất hiện đúng 1 lần lúc tạo.
+# View a poll (replace YOUR_CODE with the code returned above).
+# The create-poll response includes "creatorToken" — it is returned exactly once.
 curl http://localhost:5001/polls/YOUR_CODE
 
-# Xem poll KÈM quyền chủ (isCreator=true nếu creatorToken khớp)
+# View a poll including creator status (isCreator=true if the token matches)
 curl "http://localhost:5001/polls/YOUR_CODE?creatorToken=YOUR_CREATOR_TOKEN"
 
-# Endpoint dành cho service khác gọi (Vote service sẽ dùng cái này)
+# Status endpoint used by other services (the Vote Service calls this)
 curl http://localhost:5001/polls/YOUR_CODE/status
 
-# Dừng poll trước hạn - cần đúng creatorToken, sai/thiếu sẽ trả 403
+# Close a poll early — requires the correct creatorToken, returns 403 otherwise
 curl -X POST http://localhost:5001/polls/YOUR_CODE/close \
   -H "Content-Type: application/json" \
   -d '{"creatorToken":"YOUR_CREATOR_TOKEN"}'
 ```
 
-## Chạy Vote service (local, không dùng Docker)
+### Vote Service (port 5002)
 
-Vote service cần **Poll service đang chạy** (để gọi `/status`). DB `PollSurveyVoteDb` đã
-tự tạo ở bước migration.
+The Vote Service requires the Poll Service to be running, since it calls
+`/status` on the Poll Service before accepting a vote.
 
-1. Chạy `PollService.Api` trước (F5, hoặc `dotnet run` — cổng 5001).
-2. Chuột phải `VoteService.Api` → **Set as Startup Project**, F5 (cổng 5002).
-
-Test nhanh:
 ```bash
-# Tạo poll trước (xem ví dụ Poll service ở trên), lấy YOUR_CODE
-
-# Vote
+# Submit a vote
 curl -X POST http://localhost:5002/votes \
   -H "Content-Type: application/json" \
   -d '{"pollCode":"YOUR_CODE","optionIndex":0,"voterToken":"test-voter-1"}'
 
-# Vote lần 2 với cùng voterToken -> sẽ bị 409 Conflict (chặn vote trùng)
+# Submit a second vote with the same voterToken -> returns 409 Conflict
 curl -X POST http://localhost:5002/votes \
   -H "Content-Type: application/json" \
   -d '{"pollCode":"YOUR_CODE","optionIndex":1,"voterToken":"test-voter-1"}'
 
-# Xem kết quả
+# View results
 curl http://localhost:5002/votes/YOUR_CODE/results
 ```
 
-## Test end-to-end cả 3 service (không cần frontend)
+## Testing the Services End-to-End
 
-Chạy cả 3 service (F5 lần lượt 3 project trong Visual Studio với "Multiple startup
-projects", hoặc đơn giản nhất là `docker compose up --build`), rồi:
+Start all four backend services (multiple startup projects in Visual
+Studio, or simply `docker compose up --build`), then:
 
 ```bash
-# 1. Tạo poll qua Poll service
+# 1. Create a poll through the Poll Service
 curl -X POST http://localhost:5001/polls \
   -H "Content-Type: application/json" \
-  -d '{"question":"Ngôn ngữ bạn thích nhất?","options":["C#","Python","JavaScript"]}'
-# -> lấy "code" trong response, gọi là YOUR_CODE
+  -d '{"question":"Which language do you prefer?","options":["C#","Python","JavaScript"]}'
+# Take the "code" from the response as YOUR_CODE
 
-# 2. Vote qua Vote service - Vote service sẽ tự gọi sang Poll service để check,
-#    rồi gọi sang Realtime service để broadcast
+# 2. Vote through the Vote Service — it will call the Poll Service to validate,
+#    then call the Realtime Service to broadcast the result
 curl -X POST http://localhost:5002/votes \
   -H "Content-Type: application/json" \
   -d '{"pollCode":"YOUR_CODE","optionIndex":0,"voterToken":"test-voter-1"}'
 
-# 3. Xem log console của Realtime service - nếu thấy request POST /broadcast/YOUR_CODE
-#    tới, nghĩa là 3 service đã nói chuyện được với nhau thành công.
+# 3. Check the Realtime Service console — a "POST /broadcast/YOUR_CODE" request
+#    appearing there confirms the three services communicated successfully.
 ```
 
-Muốn xem trực quan hơn (không chỉ qua log), mở Postman/console JS bất kỳ, kết nối
-`http://localhost:5003/hubs/results` bằng thư viện `@microsoft/signalr`, gọi
-`connection.invoke("JoinPoll", "YOUR_CODE")`, rồi lặp lại bước vote ở trên - sẽ thấy
-event `ResultsUpdated` bắn về ngay lập tức.
+To see this visually rather than in logs alone, connect a client (Postman,
+or any JavaScript console) to `http://localhost:5003/hubs/results` using
+the `@microsoft/signalr` library, call
+`connection.invoke("JoinPoll", "YOUR_CODE")`, then repeat the vote step
+above — a `ResultsUpdated` event should arrive immediately.
 
-## Test gateway (Ocelot)
+### Testing through the API Gateway
 
-Chạy đủ 4 project (hoặc `docker compose up --build`), rồi gọi qua gateway thay vì
-gọi thẳng từng service:
+With all four services running, call the gateway instead of a service
+directly:
 
 ```bash
 curl -X POST http://localhost:5000/api/polls \
   -H "Content-Type: application/json" \
-  -d '{"question":"Test qua gateway?","options":["Có","Không"]}'
+  -d '{"question":"Test through the gateway?","options":["Yes","No"]}'
 ```
 
-Kết quả phải giống hệt gọi thẳng `localhost:5001/polls`. SignalR qua gateway
-(`ws://localhost:5000/hubs/results`) là tính năng Ocelot đánh dấu thử nghiệm - nếu
-gặp lỗi khi làm frontend, cho frontend kết nối thẳng `ws://localhost:5003/hubs/results`
-thay vì qua gateway (vẫn đúng kiến trúc, chỉ bỏ qua gateway riêng cho giao thức này).
+The result should be identical to calling `localhost:5001/polls` directly.
+SignalR through the gateway (`ws://localhost:5000/hubs/results`) uses a
+feature Ocelot itself marks as experimental — if this causes issues, the
+frontend can connect directly to `ws://localhost:5003/hubs/results`
+instead, which is still architecturally valid and simply bypasses the
+gateway for this one protocol.
 
-## Chạy toàn bộ bằng Docker Compose (1 lệnh cho cả backend lẫn frontend)
+## Automated Tests and CI
 
-```bash
-docker compose up --build
-```
+Unit test projects exist for the Poll Service and Vote Service
+(`tests/PollService.Api.Tests`, `tests/VoteService.Api.Tests`), covering
+core validation logic such as poll creation, option-count limits, and
+duplicate-vote handling.
 
-Lệnh này khởi động **tất cả**: SQL Server, 4 service backend (Poll/Vote/Realtime/Gateway),
-và cả frontend (chạy Vite dev server trong container, có mount code nên sửa file
-trên máy vẫn tự hot-reload như chạy `npm run dev` bình thường).
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs automatically
+on every push and pull request to `main`:
 
-- Frontend: `http://localhost:5173`
-- Gateway: `http://localhost:5000`, Poll service: `http://localhost:5001` (vẫn gọi
-  trực tiếp được để debug). SQL Server container chạy ở port `1433`.
+1. Checkout code
+2. Set up .NET 8
+3. Restore dependencies
+4. Build (Release configuration)
+5. Run unit tests
+6. Publish test results as a workflow artifact (`.trx`)
 
-Lưu ý: SQL Server khởi động chậm hơn các service .NET vài giây. Các service backend
-đã có `restart: on-failure` nên nếu container nào crash ở lần thử đầu (do SQL Server
-chưa kịp sẵn sàng), Docker sẽ tự khởi động lại - không cần bạn làm gì thêm, chỉ cần
-đợi khoảng 10-20 giây sau `docker compose up` là mọi thứ ổn định.
+The pipeline currently builds and tests the solution only — it does not yet
+build or push a Docker image, and there is no automated deployment step.
 
-Muốn dừng toàn bộ: `Ctrl+C` rồi `docker compose down` (thêm `-v` nếu muốn xoá luôn
-dữ liệu SQL Server đã lưu).
+## Known Limitations
 
-## Kiến trúc
+- No cloud deployment yet — the system currently runs locally or via Docker Compose only.
+- No JWT-based authentication or user accounts. Access control relies on lightweight, single-use tokens (`CreatorToken` for poll creators, `VoterToken` for voters) rather than a full identity system.
+- Unit test coverage is partial; not every validation path is covered yet.
+- CI builds and tests the solution but does not deploy it.
+- SignalR routing through the API Gateway relies on an Ocelot feature that is still considered experimental; the frontend currently connects to the Realtime Service directly as a result.
 
-```
-Frontend SPA (chưa code)
-   |-- mọi request REST --> API Gateway (Ocelot, port 5000)
-   |-- WebSocket (khuyến nghị) --> Realtime service trực tiếp (port 5003)
+## Planned Next Steps
 
-API Gateway
-   |-- /api/polls/**  --> Poll service      (own poll DB - port 5001)
-   |-- /api/votes/**  --> Vote service      (own vote DB - port 5002)
-   |-- /hubs/**       --> Realtime service  (SignalR hub - port 5003, thử nghiệm)
+1. Expand unit test coverage (empty questions, option counts outside the 2–6 range, duplicate votes, expired polls, status calls for a poll that does not exist).
+2. Extend the CI pipeline to build and push Docker images for all four services to a container registry.
+3. Add an automated deployment step (e.g. to Render or Railway), with each service deployed independently and environment variables pointing to the others' public URLs — similar to how `docker-compose.yml` currently points services at each other by container name, but using public domains and an updated `ocelot.Docker.json`.
+4. Introduce JWT-based authentication in place of the current lightweight token system.
+5. Add monitoring/alerting and consider a message queue (RabbitMQ or Kafka) for service-to-service events as the system grows.
 
-Vote service
-   |-- GET  /polls/{code}/status   --> Poll service      (validate trước khi ghi vote)
-   |-- POST /broadcast/{code}      --> Realtime service  (best-effort, sau khi ghi vote)
-```
+## Technical Notes
 
-Vote service không tự validate poll — nó luôn hỏi Poll service qua REST trước khi
-ghi vote. Đây là điểm quan trọng nhất để giải thích trong phần presentation: ranh
-giới trách nhiệm rõ ràng + giao tiếp service-to-service thật, không phải chỉ tách
-code cho có.
-
-## Việc tiếp theo (theo đúng thứ tự)
-
-1. ~~**Vote service**~~ ✅ xong.
-2. ~~**Realtime service**~~ ✅ xong.
-3. ~~**API Gateway**~~ ✅ xong.
-4. ~~**EF Migrations**~~ ✅ xong (SQL Server + `Database.Migrate()`).
-5. ~~**Frontend**~~ ✅ xong (React + Vite).
-6. **Unit test** cho logic validate (question rỗng, số option ngoài khoảng 2–6, vote
-   trùng, poll hết hạn, gọi status khi poll không tồn tại).
-7. **GitHub Actions**: build + push 4 image (Poll, Vote, Realtime, Gateway), deploy lên
-   Render/Railway - mỗi service 1 web service, set biến môi trường trỏ URL public của
-   nhau (tương tự cách `docker-compose.yml` đang trỏ qua tên container, chỉ đổi
-   sang domain public + cập nhật `ocelot.Docker.json` cho khớp).
-
-## Ghi chú kỹ thuật
-
-- Database dùng **EF Core Migrations** (`Database.Migrate()` chạy tự động khi app khởi
-  động) - không dùng `EnsureCreated()`, thể hiện quy trình chuẩn, cộng điểm Merit.
-- `Options` trong entity `Poll` là `string[]` trong C#, nhưng SQL Server không hỗ trợ kiểu
-  mảng như Postgres - EF Core value converter trong `PollDbContext.cs` tự chuyển nó thành
-  JSON khi lưu và ngược lại khi đọc, hoàn toàn trong suốt với phần code còn lại.
-- Local dev dùng LocalDB (built-in với Visual Studio), Docker dùng SQL Server container -
-  chỉ khác connection string, không phải sửa code khi chuyển qua lại.
+- The database uses **EF Core Migrations** (`Database.Migrate()` runs automatically at application startup) rather than `EnsureCreated()`, reflecting a standard, production-style workflow.
+- The `Poll` entity's `Options` property is a `string[]` in C#, but SQL Server has no native array type (unlike PostgreSQL). An EF Core value converter in `PollDbContext.cs` transparently serializes it to JSON on save and deserializes it on read, with no impact on the rest of the code.
+- Local development uses LocalDB, while Docker Compose uses a SQL Server container — only the connection string changes between the two; no code changes are needed when switching.
